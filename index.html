@@ -238,14 +238,15 @@
             filter: drop-shadow(0 0 2px var(--vector-color));
         }
         
-        .axis path,
-        .axis line {
+        .grid-line {
             stroke: var(--vector-dim);
+            stroke-opacity: 0.3;
+            stroke-width: 0.5px;
         }
         
-        .axis text {
-            fill: var(--vector-dim);
-            font-family: 'Share Tech Mono', monospace;
+        .head-dot {
+            fill: var(--vector-color);
+            filter: drop-shadow(0 0 4px var(--vector-color));
         }
 
         /* --- Modal System --- */
@@ -308,7 +309,7 @@
 </div>
 
 <div class="vector-container">
-    <div class="header">VECTOR.LIFE v1.2</div>
+    <div class="header">VECTOR.LIFE v1.3</div>
 
     <div class="workspace">
         <!-- Main Grid Scope -->
@@ -399,12 +400,14 @@
     // --- Initialization ---
     function init() {
         createGrids();
-        // CRITICAL FIX: initGraph must be called BEFORE randomizeGrid,
-        // because randomizeGrid tries to update the graph data.
-        initGraph(); 
-        randomizeGrid(); 
-        render();
-        updateUI();
+        
+        // Wait for next frame to ensure layout is ready so clientWidth > 0
+        setTimeout(() => {
+            initGraph(); 
+            randomizeGrid(); 
+            render();
+            updateUI();
+        }, 50);
     }
 
     function createGrids() {
@@ -740,16 +743,31 @@
         const container = document.getElementById('graph-area');
         container.innerHTML = '';
         
-        const margin = {top: 5, right: 0, bottom: 5, left: 0};
-        const width = container.clientWidth - margin.left - margin.right;
-        const height = container.clientHeight - margin.top - margin.bottom;
+        // Ensure width is valid even if hidden
+        const width = Math.max(container.clientWidth, 300) - 10;
+        const height = Math.max(container.clientHeight, 100) - 10;
+        const margin = {top: 5, left: 5};
 
         svg = d3.select("#graph-area")
             .append("svg")
-            .attr("width", width + margin.left + margin.right)
-            .attr("height", height + margin.top + margin.bottom)
+            .attr("width", "100%")
+            .attr("height", "100%")
+            .attr("viewBox", `0 0 ${width + 10} ${height + 10}`)
             .append("g")
             .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        // Draw background grid lines
+        for(let i=0; i<=10; i++) {
+            svg.append("line")
+               .attr("class", "grid-line")
+               .attr("x1", (width/10)*i).attr("y1", 0)
+               .attr("x2", (width/10)*i).attr("y2", height);
+            
+            svg.append("line")
+               .attr("class", "grid-line")
+               .attr("x1", 0).attr("y1", (height/10)*i)
+               .attr("x2", width).attr("y2", (height/10)*i);
+        }
 
         // Scales
         graphScaleX = d3.scaleLinear().domain([0, maxHistory]).range([0, width]);
@@ -766,9 +784,6 @@
             .datum(populationHistory)
             .attr("class", "line")
             .attr("d", lineGen);
-            
-        // Note: We don't call updateGraphData(0) here automatically anymore,
-        // we let randomizeGrid or loadPattern handle the first data point.
     }
     
     function resetGraph() {
@@ -791,6 +806,16 @@
             svg.select(".line")
                 .datum(populationHistory)
                 .attr("d", lineGen);
+            
+            // Add or Update Head Dot
+            const lastIndex = populationHistory.length - 1;
+            svg.selectAll(".head-dot").remove(); // Clear old
+            
+            svg.append("circle")
+               .attr("class", "head-dot")
+               .attr("cx", graphScaleX(lastIndex))
+               .attr("cy", graphScaleY(pop))
+               .attr("r", 3);
         }
             
         popIndicator.innerText = pop;
