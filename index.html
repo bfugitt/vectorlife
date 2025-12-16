@@ -310,7 +310,7 @@
 </div>
 
 <div class="vector-container">
-    <div class="header">VECTOR.LIFE v1.5</div>
+    <div class="header">VECTOR.LIFE v1.6</div>
 
     <div class="workspace">
         <!-- Main Grid Scope -->
@@ -367,7 +367,20 @@
              <input type="range" id="speed-range" min="1" max="60" value="10" oninput="updateSpeed()">
         </div>
     </div>
+
+    <!-- Controls Row 4: System IO -->
+    <div class="controls-row" style="border-top: 1px dashed var(--vector-dim); padding-top: 15px;">
+        <!-- Disabled by default, enabled via JS when library loads -->
+        <button class="btn" id="export-btn" onclick="exportLifeGIF()" style="border-style: double; border-width: 3px; width: 100%;" disabled>LOADING LIB...</button>
+    </div>
 </div>
+
+<script type="module">
+    // Direct named import to make sure we get the library logic
+    import { GIFEncoder } from 'https://cdn.jsdelivr.net/npm/gifenc@1.0.3/dist/gifenc.esm.js';
+    window.gifenc = { GIFEncoder };
+    window.dispatchEvent(new Event('giflib_ready'));
+</script>
 
 <script>
     // --- Configuration ---
@@ -410,8 +423,21 @@
             randomizeGrid(); 
             render();
             updateUI();
+            
+            // Check library
+            if (window.gifenc) enableExport();
         }, 50);
     }
+    
+    function enableExport() {
+        const btn = document.getElementById('export-btn');
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = "&gt; EXPORT GIF SIMULATION &lt;";
+        }
+    }
+    
+    window.addEventListener('giflib_ready', enableExport);
 
     function createGrids() {
         grid = new Array(gridSize).fill(0).map(() => new Array(gridSize).fill(0));
@@ -444,50 +470,57 @@
     }
 
     // --- Core Life Logic ---
-    function countNeighbors(x, y) {
+    function countNeighbors(x, y, sourceGrid) {
         let sum = 0;
         for (let i = -1; i < 2; i++) {
             for (let j = -1; j < 2; j++) {
                 let col = (x + i + gridSize) % gridSize;
                 let row = (y + j + gridSize) % gridSize;
-                sum += grid[row][col];
+                sum += sourceGrid[row][col];
             }
         }
-        sum -= grid[y][x];
+        sum -= sourceGrid[y][x];
         return sum;
     }
 
-    function computeNextGen() {
+    // Updated to optionally accept a grid source/dest for simulation
+    function computeNextGen(source = grid, dest = nextGrid) {
         let changed = false;
         let pop = 0;
         
         for (let y = 0; y < gridSize; y++) {
             for (let x = 0; x < gridSize; x++) {
-                let state = grid[y][x];
-                let neighbors = countNeighbors(x, y);
+                let state = source[y][x];
+                let neighbors = countNeighbors(x, y, source);
 
                 if (state == 0 && neighbors == 3) {
-                    nextGrid[y][x] = 1;
+                    dest[y][x] = 1;
                     changed = true;
                 } else if (state == 1 && (neighbors < 2 || neighbors > 3)) {
-                    nextGrid[y][x] = 0;
+                    dest[y][x] = 0;
                     changed = true;
                 } else {
-                    nextGrid[y][x] = state;
+                    dest[y][x] = state;
                 }
                 
-                if (nextGrid[y][x] === 1) pop++;
+                if (dest[y][x] === 1) pop++;
             }
         }
-
-        // Swap grids
+        
+        return { changed, pop };
+    }
+    
+    // Main step function for the UI loop
+    function runStep() {
+        const result = computeNextGen(grid, nextGrid);
+        
+        // Swap
         let temp = grid;
         grid = nextGrid;
         nextGrid = temp;
         
         generation++;
-        updateGraphData(pop);
-        return changed;
+        updateGraphData(result.pop);
     }
 
     // --- Drawing Engine (Vector Style) ---
@@ -513,33 +546,41 @@
         ctx.shadowBlur = 0;
     }
 
-    function drawGridLines() {
-        ctx.strokeStyle = '#1a8000'; // Dim green
-        ctx.lineWidth = 0.5;
-        ctx.beginPath();
+    function drawGridLines(targetCtx) {
+        targetCtx.strokeStyle = '#1a8000'; // Dim green
+        targetCtx.lineWidth = 0.5;
+        targetCtx.beginPath();
         for (let i = 0; i <= gridSize; i++) {
-            ctx.moveTo(i * pixelSize, 0);
-            ctx.lineTo(i * pixelSize, canvasSize);
-            ctx.moveTo(0, i * pixelSize);
-            ctx.lineTo(canvasSize, i * pixelSize);
+            targetCtx.moveTo(i * pixelSize, 0);
+            targetCtx.lineTo(i * pixelSize, canvasSize);
+            targetCtx.moveTo(0, i * pixelSize);
+            targetCtx.lineTo(canvasSize, i * pixelSize);
         }
-        ctx.stroke();
+        targetCtx.stroke();
     }
 
-    function render() {
-        ctx.clearRect(0, 0, canvasSize, canvasSize);
-        drawGridLines();
+    function render(targetCtx = ctx, sourceGrid = grid) {
+        targetCtx.clearRect(0, 0, canvasSize, canvasSize);
+        
+        // Fill black background if rendering to export canvas
+        if (targetCtx !== ctx) {
+            targetCtx.fillStyle = "#000000";
+            targetCtx.fillRect(0, 0, canvasSize, canvasSize);
+        }
+        
+        drawGridLines(targetCtx);
 
-        const color = getComputedStyle(document.documentElement).getPropertyValue('--vector-color').trim();
+        const color = getComputedStyle(document.documentElement).getPropertyValue('--vector-color').trim() || '#33ff00';
         
         for (let y = 0; y < gridSize; y++) {
             for (let x = 0; x < gridSize; x++) {
-                if (grid[y][x] === 1) {
-                    drawVectorRect(ctx, x * pixelSize, y * pixelSize, pixelSize, color, true);
+                if (sourceGrid[y][x] === 1) {
+                    drawVectorRect(targetCtx, x * pixelSize, y * pixelSize, pixelSize, color, true);
                 }
             }
         }
-        updateUI();
+        
+        if (targetCtx === ctx) updateUI();
     }
 
     function updateUI() {
@@ -613,7 +654,7 @@
         document.getElementById('step-btn').disabled = true;
         
         intervalId = setInterval(() => {
-            computeNextGen();
+            runStep();
             render();
         }, 1000 / fps);
     }
@@ -629,7 +670,7 @@
 
     function step() {
         if (isRunning) stopSimulation();
-        computeNextGen();
+        runStep();
         render();
     }
 
@@ -647,7 +688,6 @@
         generation = 0;
         populationHistory = [];
         
-        // Ensure graph variables are initialized just in case (though init fixes this)
         if (!graphScaleY) initGraph();
         
         let pop = 0;
@@ -686,10 +726,7 @@
     // --- Patterns ---
     function loadPattern(type) {
         if (!type) return;
-        
         stopSimulation();
-        
-        // Add pattern to CURRENT grid (Additive logic)
         
         const padding = 5;
         const maxX = Math.max(0, gridSize - padding);
@@ -703,39 +740,23 @@
         };
 
         if (type === 'glider') {
-            // Standard Glider moving SE
-            // . O .
-            // . . O
-            // O O O
             set(cy, cx+1);
             set(cy+1, cx+2);
             set(cy+2, cx); set(cy+2, cx+1); set(cy+2, cx+2);
         } else if (type === 'block') {
-            // 2x2 Block
             set(cy, cx); set(cy, cx+1); 
             set(cy+1, cx); set(cy+1, cx+1);
         } else if (type === 'beacon') {
-            // Beacon (Period 2)
-            // O O . .
-            // O O . .
-            // . . O O
-            // . . O O
-            set(cy, cx); set(cy, cx+1);
-            set(cy+1, cx); set(cy+1, cx+1);
-            set(cy+2, cx+2); set(cy+2, cx+3);
-            set(cy+3, cx+2); set(cy+3, cx+3);
+            set(cy, cx); set(cy, cx+1); set(cy+1, cx);
+            set(cy+2, cx+3); set(cy+3, cx+2); set(cy+3, cx+3);
         } else if (type === 'pulsar') {
-             // Pulsar (Period 3) - Uses center offsets
-             // Requires about 13x13 space
              const p = [2, 3, 4];
-             // Vertical bars
              for (let i of p) {
                  set(cy-1, cx-i); set(cy-1, cx+i);
                  set(cy+1, cx-i); set(cy+1, cx+i);
                  set(cy-6, cx-i); set(cy-6, cx+i);
                  set(cy+6, cx-i); set(cy+6, cx+i);
              }
-             // Horizontal bars
              for (let i of p) {
                  set(cy-i, cx-1); set(cy-i, cx+1);
                  set(cy+i, cx-1); set(cy+i, cx+1);
@@ -743,11 +764,6 @@
                  set(cy+i, cx-6); set(cy+i, cx+6);
              }
         } else if (type === 'lwss') {
-            // LWSS moving Right
-            // . O . . O
-            // O . . . .
-            // O . . . O
-            // O O O O .
             set(cy, cx+1); set(cy, cx+4);
             set(cy+1, cx);
             set(cy+2, cx); set(cy+2, cx+4);
@@ -760,6 +776,180 @@
         updateGraphData(totalPop);
         document.getElementById('pattern-selector').value = ""; 
         render();
+    }
+
+    // --- HEX to RGB Helper ---
+    function hexToRgb(hex) {
+        var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+        } : { r: 51, g: 255, b: 0 };
+    }
+
+    function getTimestampFilename(ext) {
+        const now = new Date();
+        return `LIFE_${now.getTime()}.${ext}`;
+    }
+
+    // --- EXPORT GIF LOGIC ---
+    function exportLifeGIF() {
+        if (!window.gifenc || !window.gifenc.GIFEncoder) { 
+            showModal("LIBRARY ERROR\nPLEASE RELOAD.");
+            return; 
+        }
+        
+        // Pause execution so we get a clean snapshot
+        const wasRunning = isRunning;
+        stopSimulation();
+
+        const { GIFEncoder } = window.gifenc;
+        const btn = document.getElementById('export-btn');
+        const originalText = btn.innerText;
+        btn.innerText = "SIMULATING...";
+        btn.disabled = true;
+
+        setTimeout(() => {
+            try {
+                const gif = new GIFEncoder();
+                const canvasW = canvas.width;
+                const canvasH = canvas.height;
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = canvasW;
+                tempCanvas.height = canvasH;
+                const tCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+                
+                // Color Prep
+                let colorHex = getComputedStyle(document.documentElement).getPropertyValue('--vector-color').trim();
+                if (!colorHex) colorHex = '#33ff00';
+                const baseColor = hexToRgb(colorHex);
+
+                // Palette Gen (Black -> Color Gradient)
+                const palette = [[5, 5, 5]]; 
+                for (let i = 1; i < 256; i++) {
+                    const ratio = i / 255;
+                    let r = Math.floor(5 + (baseColor.r - 5) * ratio);
+                    let g = Math.floor(5 + (baseColor.g - 5) * ratio);
+                    let b = Math.floor(5 + (baseColor.b - 5) * ratio);
+                    palette.push([r, g, b]);
+                }
+
+                // Setup Simulation Clone
+                // We use Deep Copy so we don't mess up the actual game board
+                let simGrid = JSON.parse(JSON.stringify(grid));
+                let simNextGrid = new Array(gridSize).fill(0).map(() => new Array(gridSize).fill(0));
+                
+                // Capture Loop
+                const maxFrames = 120; // 120 frames @ 20fps = 6 seconds
+                let lastGridStr = "";
+
+                for (let f = 0; f < maxFrames; f++) {
+                    // 1. Render Current State to Temp Canvas
+                    render(tCtx, simGrid);
+                    
+                    // 2. Map Pixels to Palette
+                    const imageData = tCtx.getImageData(0, 0, canvasW, canvasH).data;
+                    const index = new Uint8Array(canvasW * canvasH);
+                    
+                    for (let i = 0; i < imageData.length; i += 4) {
+                        const r = imageData[i];
+                        const g = imageData[i + 1];
+                        const b = imageData[i + 2];
+                        const a = imageData[i + 3];
+                        if (a < 50) { index[i / 4] = 0; continue; }
+                        let brightness = Math.max(r, g, b);
+                        if (brightness < 10) index[i / 4] = 0;
+                        else index[i / 4] = brightness; 
+                    }
+                    
+                    // 3. Write Frame
+                    gif.writeFrame(index, canvasW, canvasH, { 
+                        palette: palette, 
+                        delay: 100 // 100ms = 10fps for slower, clearer viewing
+                    });
+
+                    // 4. Advance Simulation Step
+                    // Check stability (simple static check)
+                    const currentStr = JSON.stringify(simGrid);
+                    if (currentStr === lastGridStr) {
+                        console.log("Stabilized at frame " + f);
+                        break; // Stop recording if static
+                    }
+                    lastGridStr = currentStr;
+
+                    // Compute next step on the clone
+                    computeNextGen(simGrid, simNextGrid);
+                    // Swap
+                    let temp = simGrid;
+                    simGrid = simNextGrid;
+                    simNextGrid = temp;
+                }
+                
+                gif.finish();
+                
+                // Download
+                const blob = new Blob([gif.bytes()], { type: 'image/gif' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = getTimestampFilename('gif');
+                a.click();
+                
+            } catch (e) {
+                console.error(e);
+                showModal("ERROR:\n" + e.message);
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+                // Resume if it was running
+                if (wasRunning) startSimulation();
+            }
+        }, 50);
+    }
+
+    function saveProject() {
+       // Placeholder if you want save functionality later
+       // Just alerting for now since JSON save wasn't requested for Life
+       const data = { gridSize, grid };
+       const blob = new Blob([JSON.stringify(data)], {type: "application/json"});
+       const url = URL.createObjectURL(blob);
+       const a = document.createElement('a');
+       a.href = url;
+       a.download = getTimestampFilename('json');
+       a.click();
+    }
+    
+    function loadProject(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            try {
+                const data = JSON.parse(evt.target.result);
+                stopSimulation();
+                if(data.gridSize) {
+                    gridSize = data.gridSize;
+                    pixelSize = canvasSize / gridSize;
+                    // update dropdown
+                    document.getElementById('grid-res').value = gridSize;
+                }
+                if(data.grid) {
+                    grid = data.grid;
+                    nextGrid = new Array(gridSize).fill(0).map(() => new Array(gridSize).fill(0));
+                }
+                generation = 0;
+                populationHistory = [];
+                initGraph(); // Reset graph
+                // Calculate pop
+                let pop = 0;
+                for (let r of grid) for (let c of r) if (c) pop++;
+                updateGraphData(pop);
+                render();
+            } catch(err) { showModal("DATA ERROR"); }
+        };
+        reader.readAsText(file);
+        e.target.value = '';
     }
 
     // --- D3 Graph Monitor ---
@@ -823,9 +1013,7 @@
         }
 
         // Update domains
-        // Ensure we scale to see the top clearly
         const maxPop = d3.max(populationHistory) || 10;
-        // Track the highest visible pop
         if (maxIndicator) maxIndicator.innerText = maxPop;
         
         if(graphScaleY) {
