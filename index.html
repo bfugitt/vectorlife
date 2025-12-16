@@ -223,6 +223,7 @@
             font-size: 0.7rem;
             color: var(--vector-color);
             text-align: right;
+            line-height: 1.2;
         }
 
         /* D3 SVG Styles */
@@ -309,7 +310,7 @@
 </div>
 
 <div class="vector-container">
-    <div class="header">VECTOR.LIFE v1.3</div>
+    <div class="header">VECTOR.LIFE v1.5</div>
 
     <div class="workspace">
         <!-- Main Grid Scope -->
@@ -326,7 +327,8 @@
             <span class="monitor-label">POPULATION_MONITOR</span>
             <div class="monitor-stats">
                 GEN: <span id="gen-indicator">0</span><br>
-                POP: <span id="pop-indicator">0</span>
+                CUR: <span id="pop-indicator">0</span><br>
+                MAX: <span id="max-indicator">0</span>
             </div>
             <div id="graph-area"></div>
         </div>
@@ -391,6 +393,7 @@
     const ctx = canvas.getContext('2d');
     const genIndicator = document.getElementById('gen-indicator');
     const popIndicator = document.getElementById('pop-indicator');
+    const maxIndicator = document.getElementById('max-indicator');
     const playBtn = document.getElementById('play-btn');
 
     // --- D3 Graph Monitor ---
@@ -541,10 +544,7 @@
 
     function updateUI() {
         genIndicator.innerText = generation;
-        // Calc pop if not running step
-        let pop = 0;
-        for(let row of grid) for(let cell of row) if(cell) pop++;
-        popIndicator.innerText = pop;
+        // Pop updated in updateGraphData for sync
     }
 
     // --- Interactive "Smart Paint" ---
@@ -650,9 +650,6 @@
         // Ensure graph variables are initialized just in case (though init fixes this)
         if (!graphScaleY) initGraph();
         
-        // NOTE: We don't call resetGraph() here because it pushes '0' to history.
-        // We want to push the ACTUAL random population instead.
-        
         let pop = 0;
         for (let y = 0; y < gridSize; y++) {
             for (let x = 0; x < gridSize; x++) {
@@ -662,9 +659,7 @@
             }
         }
         
-        // Manually update graph with the initial state
         updateGraphData(pop);
-        
         render();
     }
     
@@ -693,46 +688,76 @@
         if (!type) return;
         
         stopSimulation();
-        // Manually reset grid without trigger resetGraph yet
-        grid = new Array(gridSize).fill(0).map(() => new Array(gridSize).fill(0));
-        generation = 0;
-        populationHistory = [];
         
-        const cx = Math.floor(gridSize / 2);
-        const cy = Math.floor(gridSize / 2);
+        // Add pattern to CURRENT grid (Additive logic)
+        
+        const padding = 5;
+        const maxX = Math.max(0, gridSize - padding);
+        const cx = Math.floor(Math.random() * (maxX - padding)) + padding;
+        const cy = Math.floor(Math.random() * (maxX - padding)) + padding;
 
-        let pop = 0;
-
-        // Helper to set and count
         const set = (r, c) => {
             if(r >=0 && r < gridSize && c >=0 && c < gridSize) {
                 grid[r][c] = 1;
-                pop++;
             }
         };
 
         if (type === 'glider') {
-            set(0, 1); set(1, 2); set(2, 0); set(2, 1); set(2, 2);
+            // Standard Glider moving SE
+            // . O .
+            // . . O
+            // O O O
+            set(cy, cx+1);
+            set(cy+1, cx+2);
+            set(cy+2, cx); set(cy+2, cx+1); set(cy+2, cx+2);
         } else if (type === 'block') {
-            set(cy, cx); set(cy, cx+1); set(cy+1, cx); set(cy+1, cx+1);
+            // 2x2 Block
+            set(cy, cx); set(cy, cx+1); 
+            set(cy+1, cx); set(cy+1, cx+1);
         } else if (type === 'beacon') {
-            set(cy-1, cx-1); set(cy-1, cx); set(cy, cx-1);
-            set(cy+1, cx+2); set(cy+2, cx+1); set(cy+2, cx+2);
+            // Beacon (Period 2)
+            // O O . .
+            // O O . .
+            // . . O O
+            // . . O O
+            set(cy, cx); set(cy, cx+1);
+            set(cy+1, cx); set(cy+1, cx+1);
+            set(cy+2, cx+2); set(cy+2, cx+3);
+            set(cy+3, cx+2); set(cy+3, cx+3);
         } else if (type === 'pulsar') {
-             for(let i=2; i<5; i++) {
+             // Pulsar (Period 3) - Uses center offsets
+             // Requires about 13x13 space
+             const p = [2, 3, 4];
+             // Vertical bars
+             for (let i of p) {
                  set(cy-1, cx-i); set(cy-1, cx+i);
                  set(cy+1, cx-i); set(cy+1, cx+i);
-                 set(cy-i, cx-1); set(cy+i, cx-1);
-                 set(cy-i, cx+1); set(cy+i, cx+1);
+                 set(cy-6, cx-i); set(cy-6, cx+i);
+                 set(cy+6, cx-i); set(cy+6, cx+i);
+             }
+             // Horizontal bars
+             for (let i of p) {
+                 set(cy-i, cx-1); set(cy-i, cx+1);
+                 set(cy+i, cx-1); set(cy+i, cx+1);
+                 set(cy-i, cx-6); set(cy-i, cx+6);
+                 set(cy+i, cx-6); set(cy+i, cx+6);
              }
         } else if (type === 'lwss') {
-            set(cy, cx); set(cy, cx+3); 
-            set(cy+1, cx-1); 
-            set(cy+2, cx-1); set(cy+2, cx+3);
-            set(cy+3, cx); set(cy+3, cx+1); set(cy+3, cx+2);
+            // LWSS moving Right
+            // . O . . O
+            // O . . . .
+            // O . . . O
+            // O O O O .
+            set(cy, cx+1); set(cy, cx+4);
+            set(cy+1, cx);
+            set(cy+2, cx); set(cy+2, cx+4);
+            set(cy+3, cx); set(cy+3, cx+1); set(cy+3, cx+2); set(cy+3, cx+3);
         }
         
-        updateGraphData(pop);
+        let totalPop = 0;
+        for (let row of grid) for (let cell of row) if (cell) totalPop++;
+        
+        updateGraphData(totalPop);
         document.getElementById('pattern-selector').value = ""; 
         render();
     }
@@ -798,8 +823,11 @@
         }
 
         // Update domains
+        // Ensure we scale to see the top clearly
         const maxPop = d3.max(populationHistory) || 10;
-        // Check if graphScaleY is defined before using it
+        // Track the highest visible pop
+        if (maxIndicator) maxIndicator.innerText = maxPop;
+        
         if(graphScaleY) {
             graphScaleY.domain([0, maxPop * 1.2]); 
 
@@ -809,7 +837,7 @@
             
             // Add or Update Head Dot
             const lastIndex = populationHistory.length - 1;
-            svg.selectAll(".head-dot").remove(); // Clear old
+            svg.selectAll(".head-dot").remove(); 
             
             svg.append("circle")
                .attr("class", "head-dot")
